@@ -22,3 +22,5 @@ erl_crash.dump
 # Ignore package tarball (built via "mix hex.build").
 forth-*.tar
 
+# Ignore generated Erlang files in src/
+src/*.erl

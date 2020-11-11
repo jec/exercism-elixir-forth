@@ -1,19 +1,18 @@
 Definitions.
 
+ID         = [a-zA-Z][a-zA-Z0-9_-]*
 INT        = [0-9]+
-WHITESPACE = [\s\t\n\r]
+OPERATORS  = [-+/*]
+% The last glyph that looks like a hyphen is an Ogham space mark.
+WHITESPACE = [\x00-\x20\s ]+
 
 Rules.
 
-\+            : {token, {plus,  TokenLine}}.
-\-            : {token, {minus, TokenLine}}.
-\*            : {token, {star,  TokenLine}}.
-\/            : {token, {slash, TokenLine}}.
-DUP           : {token, {dup,   TokenLine}}.
-DROP          : {token, {drop,  TokenLine}}.
-SWAP          : {token, {swap,  TokenLine}}.
-OVER          : {token, {over,  TokenLine}}.
-{INT}         : {token, {int,   TokenLine, list_to_integer(TokenChars)}}.
-{WHITESPACE}+ : skip_token.
+{WHITESPACE} : skip_token.
+{INT}        : {token, {int, TokenLine, list_to_integer(TokenChars)}}.
+\:           : {token, {startdef, TokenLine}}.
+\;           : {token, {enddef, TokenLine}}.
+{ID}         : {token, {id, TokenLine, TokenChars}}.
+{OPERATORS}  : {token, {op, TokenLine, TokenChars}}.
 
 Erlang code.
