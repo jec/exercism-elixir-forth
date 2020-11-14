@@ -1,17 +1,11 @@
 defmodule Forth do
   @moduledoc """
   Implements a simple Forth evaluator
-
-  States:
-  * none -- not building anything
-  * int -- building an integer
-  * identifier -- building an identifier
-  * define -- defining a new command
   """
 
-  defstruct [state: :none, buf: "", stack: []]
+  defstruct [stack: [], dict: %{}, startdef: false]
 
-  @type t :: %Forth{state: state(), buf: String.t(), stack: stack()}
+  @type t :: %Forth{stack: stack(), dict: %{}, startdef: boolean}
 
   @type state :: :none | :int
 
@@ -31,85 +25,13 @@ defmodule Forth do
   Evaluate an input string, updating the evaluator state.
   """
   @spec eval(t(), String.t()) :: t()
-
-  ### State: none ###
-
-  # Input: end-of-string
-  # Output: return the struct
-  def eval(forth = %Forth{state: :none}, <<>>) do
+  def eval(forth, <<>>) do
     forth
   end
-
-  # Input: digit
-  # Output: create buffer with digit as initial value
-  # Next state: int
-  def eval(%Forth{state: :none, stack: stack}, <<ch::utf8, rest::binary>>) when ?0 <= ch and ch <= ?9 do
-    eval(%Forth{state: :int, buf: <<ch>>, stack: stack}, rest)
-  end
-
-  # Input: non-printing char or space
-  # Output: no-op
-  # Next state: same state (none)
-  def eval(forth = %Forth{state: :none}, <<ch::utf8, rest::binary>>) when ch <= 32 or ch == ?  do
-    eval(forth, rest)
-  end
-
-  # Input: binary operator
-  # Output: pop 2 values from stack; execute operator; push result onto stack
-  # Next state: same state (none)
-  def eval(%Forth{state: :none, stack: stack}, <<ch::utf8, rest::binary>>) when ch == ?+ or ch == ?- or ch == ?* or ch == ?/ do
-    eval(%Forth{state: :none, buf: nil, stack: eval_operator(ch, stack)}, rest)
-  end
-
-  # Input: other character
-  # Output: create buffer with character as initial value
-  # Next state: identifier
-  def eval(%Forth{state: :none, stack: stack}, <<ch::utf8, rest::binary>>) do
-    eval(%Forth{state: :identifier, buf: <<ch::utf8>>, stack: stack}, rest)
-  end
-
-  ### State: int ###
-
-  # Input: end-of-string
-  # Output: push integer onto stack; return the struct
-  def eval(%Forth{state: :int, buf: buf, stack: stack}, <<>>) do
-    %Forth{state: :none, buf: nil, stack: [String.to_integer(buf) | stack]}
-  end
-
-  # Input: digit
-  # Output: append digit to buffer
-  # Next state: same state (int)
-  def eval(%Forth{state: :int, buf: buf, stack: stack}, <<ch::utf8, rest::binary>>) when ?0 <= ch and ch <= ?9 do
-    eval(%Forth{state: :int, buf: buf <> <<ch>>, stack: stack}, rest)
-  end
-
-  # Input: non-printing char or space
-  # Output: push integer onto stack
-  # Next state: none
-  def eval(%Forth{state: :int, buf: buf, stack: stack}, <<ch::utf8, rest::binary>>) when ch <= 32 or ch == ?  do
-    eval(%Forth{state: :none, buf: nil, stack: [String.to_integer(buf) | stack]}, rest)
-  end
-
-  ### State: identifier ###
-
-  # Input: end-of-string
-  # Output: apply command to stack; return the struct
-  def eval(%Forth{state: :identifier, buf: command, stack: stack}, <<>>) do
-    %Forth{state: :none, buf: nil, stack: execute_command(String.downcase(command), stack)}
-  end
-
-  # Input: non-printing char or space
-  # Output: apply command to stack
-  # Next state: none
-  def eval(%Forth{state: :identifier, buf: command, stack: stack}, <<ch::utf8, rest::binary>>) when ch <= 32 or ch == ?  do
-    eval(%Forth{state: :none, buf: nil, stack: execute_command(command, stack)}, rest)
-  end
-
-  # Input: other character
-  # Output: append character to buffer
-  # Next state: same state (identifier)
-  def eval(%Forth{state: :identifier, buf: buf, stack: stack}, <<ch::utf8, rest::binary>>) do
-    eval(%Forth{state: :identifier, buf: buf <> <<ch::utf8>>, stack: stack}, rest)
+  def eval(forth, str) do
+    {token_type, value, next_str} = Forth.Tokenizer.eval(str)
+    next_forth = eval_token({token_type, value}, forth)
+    eval(next_forth, next_str)
   end
 
   @doc """
@@ -119,6 +41,58 @@ defmodule Forth do
   @spec format_stack(t()) :: String.t()
   def format_stack(%Forth{stack: stack}) do
     stack |> Enum.reverse() |> Enum.join(" ")
+  end
+
+  # Evaluates a token in the context of a Forth struct and returns an updated
+  # Forth struct
+  @spec eval_token({Forth.Tokenizer.token_type(), any}, t()) :: t()
+
+  # int
+  defp eval_token(token = {:int, _}, forth = %Forth{startdef: true, stack: [command_def | stack]}) do
+    %Forth{forth | stack: [[token | command_def] | stack]}
+  end
+  defp eval_token({:int, int}, forth = %Forth{startdef: false, stack: stack}) do
+    %Forth{forth | stack: [int | stack]}
+  end
+
+  # op
+  defp eval_token(token = {:op, _}, forth = %Forth{startdef: true, stack: [command_def | stack]}) do
+    %Forth{forth | stack: [[token | command_def] | stack]}
+  end
+  defp eval_token({:op, op}, forth = %Forth{startdef: false, stack: stack}) do
+    %Forth{forth | stack: eval_operator(op, stack)}
+  end
+
+  # id
+  defp eval_token(token = {:id, _}, forth = %Forth{startdef: true, stack: [command_def | stack]}) do
+    %Forth{forth | stack: [[token | command_def] | stack]}
+  end
+  defp eval_token({:id, command}, forth = %Forth{startdef: false}) do
+    String.downcase(command) |> execute_command(forth)
+  end
+
+  # startdef
+  defp eval_token({:startdef, _}, forth = %Forth{startdef: false, stack: stack}) do
+    %Forth{forth | startdef: true, stack: [[] | stack]}
+  end
+
+  # enddef
+  defp eval_token({:enddef, _}, %Forth{startdef: true, stack: [command_def | stack], dict: dict}) do
+    case Enum.reverse(command_def) do
+      [{:id, name} | tokens] ->
+        %Forth{startdef: false, stack: stack, dict: Map.put(dict, name, tokens)}
+      [{:int, int} | _] -> raise Forth.InvalidWord, word: int
+    end
+  end
+
+  # Recursively evaluates a list of tokens
+  @spec eval_tokens(t(), [{Forth.Tokenizer.token_type(), any}]) :: t()
+  defp eval_tokens(forth, []) do
+    forth
+  end
+  defp eval_tokens(forth, [token | rest]) do
+    next_forth = eval_token(token, forth)
+    eval_tokens(next_forth, rest)
   end
 
   # Evaluates a binary operator in the context of a stack
@@ -147,38 +121,50 @@ defmodule Forth do
     [div(x, y) | rest]
   end
 
-  defp execute_command("dup", []) do
+  # Executes a named command
+  @spec execute_command(String.t(), t()) :: t()
+
+  defp execute_command("dup", %Forth{stack: []}) do
     raise Forth.StackUnderflow
   end
-  defp execute_command("dup", stack = [x | _]) do
-    [x | stack]
+  defp execute_command("dup", forth) do
+    %Forth{forth | stack: [hd(forth.stack) | forth.stack]}
   end
 
-  defp execute_command("drop", []) do
+  defp execute_command("drop", %Forth{stack: []}) do
     raise Forth.StackUnderflow
   end
-  defp execute_command("drop", [_ | rest]) do
-    rest
+  defp execute_command("drop", forth) do
+    %Forth{forth | stack: tl(forth.stack)}
   end
 
-  defp execute_command("swap", []) do
+  defp execute_command("swap", %Forth{stack: []}) do
     raise Forth.StackUnderflow
   end
-  defp execute_command("swap", [_]) do
+  defp execute_command("swap", %Forth{stack: [_]}) do
     raise Forth.StackUnderflow
   end
-  defp execute_command("swap", [y | [x | rest]]) do
-    [x | [y | rest]]
+  defp execute_command("swap", forth) do
+    [y | [x | rest]] = forth.stack
+    %Forth{forth | stack: [x | [y | rest]]}
   end
 
-  defp execute_command("over", []) do
+  defp execute_command("over", %Forth{stack: []}) do
     raise Forth.StackUnderflow
   end
-  defp execute_command("over", [_]) do
+  defp execute_command("over", %Forth{stack: [_]}) do
     raise Forth.StackUnderflow
   end
-  defp execute_command("over", stack = [_ | [x | _]]) do
-    [x | stack]
+  defp execute_command("over", forth) do
+    [_ | [x | _]] = forth.stack
+    %Forth{forth | stack: [x | forth.stack]}
+  end
+
+  defp execute_command(command, forth) do
+    case forth.dict do
+      %{^command => tokens} -> eval_tokens(forth, tokens)
+      _ -> raise Forth.UnknownWord, word: command
+    end
   end
 
   defmodule StackUnderflow do
