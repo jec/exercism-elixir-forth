@@ -1,21 +1,23 @@
 defmodule Forth do
   @moduledoc """
-    Implements a simple Forth evaluator
+  Implements a simple Forth evaluator
 
-    States:
-    * none -- not building anything
-    * int -- building an integer
-    * identifier -- building an identifier
-    * define -- defining a new command
+  States:
+  * none -- not building anything
+  * int -- building an integer
+  * identifier -- building an identifier
+  * define -- defining a new command
   """
 
   defstruct [state: :none, buf: "", stack: []]
 
-  @type t :: %Forth{state: state(), buf: String.t(), stack: [stack()]}
+  @type t :: %Forth{state: state(), buf: String.t(), stack: stack()}
 
   @type state :: :none | :int
 
-  @type stack :: integer | t()
+  @type stack :: [integer | t()]
+
+  @type binary_op :: ?+ | ?- | ?* | ?/
 
   @doc """
   Create a new evaluator.
@@ -52,35 +54,11 @@ defmodule Forth do
     eval(forth, rest)
   end
 
-  # Input: addition operator
+  # Input: binary operator
   # Output: pop 2 values from stack; execute operator; push result onto stack
   # Next state: same state (none)
-  def eval(%Forth{state: :none, stack: [y | [x | stack]]}, <<ch::utf8, rest::binary>>) when ch == ?+ do
-    eval(%Forth{state: :none, buf: nil, stack: [x + y | stack]}, rest)
-  end
-
-  # Input: subtraction operator
-  # Output: pop 2 values from stack; execute operator; push result onto stack
-  # Next state: same state (none)
-  def eval(%Forth{state: :none, stack: [y | [x | stack]]}, <<ch::utf8, rest::binary>>) when ch == ?- do
-    eval(%Forth{state: :none, buf: nil, stack: [x - y | stack]}, rest)
-  end
-
-  # Input: multiplication operator
-  # Output: pop 2 values from stack; execute operator; push result onto stack
-  # Next state: same state (none)
-  def eval(%Forth{state: :none, stack: [y | [x | stack]]}, <<ch::utf8, rest::binary>>) when ch == ?* do
-    eval(%Forth{state: :none, buf: nil, stack: [x * y | stack]}, rest)
-  end
-
-  # Input: division operator
-  # Output: pop 2 values from stack; execute operator; push result onto stack
-  # Next state: same state (none)
-  def eval(%Forth{state: :none, stack: [y | _]}, <<ch::utf8, _::binary>>) when ch == ?/ and y == 0 do
-    raise Forth.DivisionByZero
-  end
-  def eval(%Forth{state: :none, stack: [y | [x | stack]]}, <<ch::utf8, rest::binary>>) when ch == ?/ do
-    eval(%Forth{state: :none, buf: nil, stack: [div(x, y) | stack]}, rest)
+  def eval(%Forth{state: :none, stack: stack}, <<ch::utf8, rest::binary>>) when ch == ?+ or ch == ?- or ch == ?* or ch == ?/ do
+    eval(%Forth{state: :none, buf: nil, stack: eval_operator(ch, stack)}, rest)
   end
 
   # Input: other character
@@ -141,6 +119,32 @@ defmodule Forth do
   @spec format_stack(t()) :: String.t()
   def format_stack(%Forth{stack: stack}) do
     stack |> Enum.reverse() |> Enum.join(" ")
+  end
+
+  # Evaluates a binary operator in the context of a stack
+  @spec eval_operator(binary_op(), stack()) :: stack()
+
+  # addition
+  defp eval_operator(?+, [y | [x | rest]]) do
+    [x + y | rest]
+  end
+
+  # subtraction
+  defp eval_operator(?-, [y | [x | rest]]) do
+    [x - y | rest]
+  end
+
+  # multiplication
+  defp eval_operator(?*, [y | [x | rest]]) do
+    [x * y | rest]
+  end
+
+  # integer division
+  defp eval_operator(?/, [0 | _]) do
+    raise Forth.DivisionByZero
+  end
+  defp eval_operator(?/, [y | [x | rest]]) do
+    [div(x, y) | rest]
   end
 
   defp execute_command("dup", []) do
