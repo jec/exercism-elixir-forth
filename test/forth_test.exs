@@ -39,6 +39,14 @@ defmodule ForthTest do
       |> Forth.format_stack()
 
     assert s == "2"
+
+    assert_raise Forth.StackUnderflow, fn ->
+      Forth.new() |> Forth.eval("+")
+    end
+
+    assert_raise Forth.StackUnderflow, fn ->
+      Forth.new() |> Forth.eval("1 *")
+    end
   end
 
   test "division by zero" do

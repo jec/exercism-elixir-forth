@@ -55,23 +55,6 @@ defmodule Forth do
   # Evaluates a token in the context of a Forth struct and returns an updated
   # Forth struct
   @spec eval_token({Forth.Tokenizer.token_type(), any}, t()) :: t()
-  defp eval_token({:int, int}, forth = %Forth{startdef: false, stack: stack}) do
-    %Forth{forth | stack: [int | stack]}
-  end
-  defp eval_token({:op, op}, forth = %Forth{startdef: false, stack: stack}) do
-    %Forth{forth | stack: eval_operator(op, stack)}
-  end
-  defp eval_token({:id, command}, forth = %Forth{startdef: false}) do
-    String.downcase(command) |> execute_command(forth)
-  end
-  defp eval_token({:stackop, op}, forth = %Forth{startdef: false, stack: stack}) do
-    %Forth{forth | stack: eval_stackop(op, stack)}
-  end
-  defp eval_token({:startdef, _}, forth = %Forth{startdef: false, stack: stack}) do
-    # Push an empty list onto the stack, which we will use to collect the
-    # tokens until we encounter an :enddef.
-    %Forth{forth | startdef: true, stack: [[] | stack]}
-  end
   defp eval_token({:enddef, _}, %Forth{startdef: true, stack: [command_def | stack], dict: dict}) do
     # Reverse the list that contains the tokens. Now the first token is the
     # name of the command to be defined, and the remaining tokens are the
@@ -82,13 +65,37 @@ defmodule Forth do
       [{:int, int} | _] -> raise Forth.InvalidWord, word: int
     end
   end
-  # any other token when startdef is true
+  # all other tokens where startdef is true
   defp eval_token(token, forth = %Forth{startdef: true, stack: [command_def | stack]}) do
     %Forth{forth | stack: [[token | command_def] | stack]}
+  end
+  # all tokens where startdef is false
+  defp eval_token({:int, int}, forth = %Forth{stack: stack}) do
+    %Forth{forth | stack: [int | stack]}
+  end
+  defp eval_token({:op, op}, forth = %Forth{stack: stack}) do
+    %Forth{forth | stack: eval_operator(op, stack)}
+  end
+  defp eval_token({:id, command}, forth) do
+    String.downcase(command) |> execute_command(forth)
+  end
+  defp eval_token({:stackop, op}, forth = %Forth{stack: stack}) do
+    %Forth{forth | stack: eval_stackop(op, stack)}
+  end
+  defp eval_token({:startdef, _}, forth = %Forth{stack: stack}) do
+    # Push an empty list onto the stack, which we will use to collect the
+    # tokens until we encounter an :enddef.
+    %Forth{forth | startdef: true, stack: [[] | stack]}
   end
 
   # Evaluates a binary operator in the context of a stack
   @spec eval_operator(binary_op(), stack()) :: stack()
+  defp eval_operator(_, []) do
+    raise Forth.StackUnderflow
+  end
+  defp eval_operator(_, [_]) do
+    raise Forth.StackUnderflow
+  end
   defp eval_operator(?+, [y | [x | rest]]) do
     [x + y | rest]
   end
@@ -116,14 +123,12 @@ defmodule Forth do
   defp eval_stackop(:drop, [_ | tail]) do
     tail
   end
-  defp eval_stackop(:swap, [_]) do
+  # The following ops require at least two on the stack.
+  defp eval_stackop(_, [_]) do
     raise Forth.StackUnderflow
   end
   defp eval_stackop(:swap, [y | [x | rest]]) do
     [x | [y | rest]]
-  end
-  defp eval_stackop(:over, [_]) do
-    raise Forth.StackUnderflow
   end
   defp eval_stackop(:over, stack = [_ | [x | _]]) do
     [x | stack]
